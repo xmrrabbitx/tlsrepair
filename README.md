@@ -113,7 +113,7 @@ The final TLS connection still performs normal certificate and hostname verifica
 Clone the repository:
 
 ```bash
-git clone https://github.com/USERNAME/tlsrepair.git
+git clone https://github.com/xmrrabbitx/tlsrepair.git
 cd tlsrepair
 ```
 
