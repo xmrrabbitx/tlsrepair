@@ -22,6 +22,7 @@ struct Memory {
 struct TLSRepair {
     CURL *curl;
     char *url;
+    int owns_curl;
     char *proxy;
     STACK_OF(X509) *aia_certificates;
     int repaired;
@@ -1143,19 +1144,15 @@ static int configure_curl_with_intermediates(
 }
 
 static int reset_curl_for_final_request(
-    TLSRepair *repair,
-    CURL *curl,
-    const char *url
+    TLSRepair *repair
 )
 {
-    if(!repair){
-        return 0;
-    }
+    if(!repair ||
+       !repair->curl){
 
-    if(!curl || !url){
         set_error(
             repair,
-            "invalid CURL handle or URL"
+            "invalid TLSRepair handle"
         );
 
         return 0;
@@ -1165,24 +1162,7 @@ static int reset_curl_for_final_request(
 
     result =
         curl_easy_setopt(
-            curl,
-            CURLOPT_URL,
-            url
-        );
-
-    if(result != CURLE_OK){
-        set_curl_error(
-            repair,
-            "failed to set CURLOPT_URL",
-            result
-        );
-
-        return 0;
-    }
-
-    result =
-        curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_NOBODY,
             0L
         );
@@ -1199,7 +1179,7 @@ static int reset_curl_for_final_request(
 
     result =
         curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_HTTPGET,
             1L
         );
@@ -1216,7 +1196,7 @@ static int reset_curl_for_final_request(
 
     result =
         curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_CUSTOMREQUEST,
             NULL
         );
@@ -1233,7 +1213,7 @@ static int reset_curl_for_final_request(
 
     result =
         curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_POST,
             0L
         );
@@ -1250,7 +1230,7 @@ static int reset_curl_for_final_request(
 
     result =
         curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_UPLOAD,
             0L
         );
@@ -1267,7 +1247,7 @@ static int reset_curl_for_final_request(
 
     result =
         curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_SSL_VERIFYPEER,
             1L
         );
@@ -1284,7 +1264,7 @@ static int reset_curl_for_final_request(
 
     result =
         curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_SSL_VERIFYHOST,
             2L
         );
@@ -1301,7 +1281,7 @@ static int reset_curl_for_final_request(
 
     result =
         curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_FRESH_CONNECT,
             1L
         );
@@ -1321,8 +1301,6 @@ static int reset_curl_for_final_request(
 
 static int get_server_certificates(
     TLSRepair *repair,
-    CURL *curl,
-    const char *url,
     STACK_OF(X509) **certificates
 )
 {
@@ -1330,7 +1308,9 @@ static int get_server_certificates(
         return 0;
     }
 
-    if(!curl || !url || !certificates){
+    if(!repair->curl ||
+       !certificates){
+
         set_error(
             repair,
             "invalid server certificate discovery parameters"
@@ -1345,24 +1325,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            curl,
-            CURLOPT_URL,
-            url
-        );
-
-    if(result != CURLE_OK){
-        set_curl_error(
-            repair,
-            "failed to set CURLOPT_URL",
-            result
-        );
-
-        return 0;
-    }
-
-    result =
-        curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_NOBODY,
             0L
         );
@@ -1379,7 +1342,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_HTTPGET,
             1L
         );
@@ -1396,7 +1359,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_CERTINFO,
             1L
         );
@@ -1413,7 +1376,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_SSL_VERIFYPEER,
             0L
         );
@@ -1430,7 +1393,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_SSL_VERIFYHOST,
             0L
         );
@@ -1447,7 +1410,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_FRESH_CONNECT,
             1L
         );
@@ -1464,7 +1427,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_WRITEFUNCTION,
             discard_callback
         );
@@ -1481,7 +1444,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            curl,
+            repair->curl,
             CURLOPT_WRITEDATA,
             NULL
         );
@@ -1497,7 +1460,9 @@ static int get_server_certificates(
     }
 
     result =
-        curl_easy_perform(curl);
+        curl_easy_perform(
+            repair->curl
+        );
 
     if(result != CURLE_OK){
         set_curl_error(
@@ -1509,11 +1474,55 @@ static int get_server_certificates(
         return 0;
     }
 
+    if(!repair->url){
+
+        const char *effective_url = NULL;
+
+        result =
+            curl_easy_getinfo(
+                repair->curl,
+                CURLINFO_EFFECTIVE_URL,
+                &effective_url
+            );
+
+        if(result != CURLE_OK ||
+           !effective_url){
+
+            set_curl_error(
+                repair,
+                "failed to get original CURL URL",
+                result
+            );
+
+            return 0;
+        }
+
+        repair->url =
+            malloc(
+                strlen(effective_url) + 1
+            );
+
+        if(!repair->url){
+
+            set_error(
+                repair,
+                "failed to allocate original CURL URL"
+            );
+
+            return 0;
+        }
+
+        strcpy(
+            repair->url,
+            effective_url
+        );
+    }
+
     struct curl_certinfo *certInfo = NULL;
 
     result =
         curl_easy_getinfo(
-            curl,
+            repair->curl,
             CURLINFO_CERTINFO,
             &certInfo
         );
@@ -1595,6 +1604,31 @@ static int download_aia_certificate(
 
     CURLcode result;
 
+    const char *original_url =
+        repair->url;
+
+    if(!original_url){
+
+        result =
+            curl_easy_getinfo(
+                curl,
+                CURLINFO_EFFECTIVE_URL,
+                &original_url
+            );
+
+        if(result != CURLE_OK ||
+           !original_url){
+
+            set_curl_error(
+                repair,
+                "failed to get original CURL URL",
+                result
+            );
+
+            return 0;
+        }
+    }
+
     result =
         curl_easy_setopt(
             curl,
@@ -1626,7 +1660,7 @@ static int download_aia_certificate(
             result
         );
 
-        return 0;
+        goto restore_url;
     }
 
     result =
@@ -1643,7 +1677,7 @@ static int download_aia_certificate(
             result
         );
 
-        return 0;
+        goto restore_url;
     }
 
     result =
@@ -1660,7 +1694,7 @@ static int download_aia_certificate(
             result
         );
 
-        return 0;
+        goto restore_url;
     }
 
     result =
@@ -1677,7 +1711,7 @@ static int download_aia_certificate(
             result
         );
 
-        return 0;
+        goto restore_url;
     }
 
     result =
@@ -1694,7 +1728,7 @@ static int download_aia_certificate(
             result
         );
 
-        return 0;
+        goto restore_url;
     }
 
     result =
@@ -1711,7 +1745,7 @@ static int download_aia_certificate(
             result
         );
 
-        return 0;
+        goto restore_url;
     }
 
     result =
@@ -1728,7 +1762,7 @@ static int download_aia_certificate(
             result
         );
 
-        return 0;
+        goto restore_url;
     }
 
     result =
@@ -1745,7 +1779,7 @@ static int download_aia_certificate(
             result
         );
 
-        return 0;
+        goto restore_url;
     }
 
     result =
@@ -1762,7 +1796,7 @@ static int download_aia_certificate(
             result
         );
 
-        return 0;
+        goto restore_url;
     }
 
     result =
@@ -1779,7 +1813,7 @@ static int download_aia_certificate(
             result
         );
 
-        return 0;
+        goto restore_url;
     }
 
     result =
@@ -1796,7 +1830,7 @@ static int download_aia_certificate(
             result
         );
 
-        return 0;
+        goto restore_url;
     }
 
     result =
@@ -1813,7 +1847,7 @@ static int download_aia_certificate(
             result
         );
 
-        return 0;
+        goto restore_url;
     }
 
     result =
@@ -1830,7 +1864,7 @@ static int download_aia_certificate(
             result
         );
 
-        return 0;
+        goto restore_url;
     }
 
     result =
@@ -1849,7 +1883,7 @@ static int download_aia_certificate(
         memory->data = NULL;
         memory->size = 0;
 
-        return 0;
+        goto restore_url;
     }
 
     if(!memory->data ||
@@ -1864,6 +1898,84 @@ static int download_aia_certificate(
 
         memory->data = NULL;
         memory->size = 0;
+
+        goto restore_url;
+    }
+
+
+restore_url:
+
+    result =
+        curl_easy_setopt(
+            curl,
+            CURLOPT_URL,
+            original_url
+        );
+
+    if(result != CURLE_OK){
+
+        set_curl_error(
+            repair,
+            "failed to restore original CURLOPT_URL",
+            result
+        );
+
+        free(memory->data);
+
+        memory->data = NULL;
+        memory->size = 0;
+
+        return 0;
+    }
+
+    result =
+        curl_easy_setopt(
+            curl,
+            CURLOPT_WRITEFUNCTION,
+            discard_callback
+        );
+
+    if(result != CURLE_OK){
+
+        set_curl_error(
+            repair,
+            "failed to restore CURLOPT_WRITEFUNCTION",
+            result
+        );
+
+        free(memory->data);
+
+        memory->data = NULL;
+        memory->size = 0;
+
+        return 0;
+    }
+
+    result =
+        curl_easy_setopt(
+            curl,
+            CURLOPT_WRITEDATA,
+            NULL
+        );
+
+    if(result != CURLE_OK){
+
+        set_curl_error(
+            repair,
+            "failed to restore CURLOPT_WRITEDATA",
+            result
+        );
+
+        free(memory->data);
+
+        memory->data = NULL;
+        memory->size = 0;
+
+        return 0;
+    }
+
+    if(!memory->data ||
+       memory->size == 0){
 
         return 0;
     }
@@ -1942,6 +2054,8 @@ TLSRepair *tlsrepair_create(
         return NULL;
     }
 
+    repair->owns_curl = 1;
+
     repair->url =
         malloc(
             strlen(url) + 1
@@ -2017,6 +2131,56 @@ TLSRepair *tlsrepair_create(
         free(repair->url);
         free(repair);
 
+        return NULL;
+    }
+
+    return repair;
+}
+
+TLSRepair *tlsrepair_from_curl(
+    CURL *curl
+)
+{
+    if(!curl){
+        return NULL;
+    }
+
+    TLSRepair *repair =
+        calloc(
+            1,
+            sizeof(*repair)
+        );
+
+    if(!repair){
+        return NULL;
+    }
+
+    repair->curl = curl;
+    repair->owns_curl = 0;
+
+    CURLcode result;
+
+    result =
+        curl_easy_setopt(
+            curl,
+            CURLOPT_CONNECTTIMEOUT,
+            10L
+        );
+
+    if(result != CURLE_OK){
+        free(repair);
+        return NULL;
+    }
+
+    result =
+        curl_easy_setopt(
+            curl,
+            CURLOPT_TIMEOUT,
+            60L
+        );
+
+    if(result != CURLE_OK){
+        free(repair);
         return NULL;
     }
 
@@ -2124,8 +2288,7 @@ int tlsrepair_prepare(
         NULL
     );
 
-    if(!repair->curl ||
-       !repair->url){
+    if(!repair->curl){
 
         set_error(
             repair,
@@ -2187,8 +2350,6 @@ int tlsrepair_prepare(
 
     if(!get_server_certificates(
         repair,
-        repair->curl,
-        repair->url,
         &certificates
     )){
         return 0;
@@ -2269,9 +2430,7 @@ int tlsrepair_prepare(
         );
 
         return reset_curl_for_final_request(
-            repair,
-            repair->curl,
-            repair->url
+            repair
         );
     }
 
@@ -2521,9 +2680,7 @@ int tlsrepair_prepare(
     }
 
     if(!reset_curl_for_final_request(
-        repair,
-        repair->curl,
-        repair->url
+        repair
     )){
 
         repair->repaired = 0;
@@ -2556,6 +2713,23 @@ void tlsrepair_destroy(
     }
 
     if(repair->curl){
+
+        curl_easy_setopt(
+            repair->curl,
+            CURLOPT_SSL_CTX_FUNCTION,
+            NULL
+        );
+
+        curl_easy_setopt(
+            repair->curl,
+            CURLOPT_SSL_CTX_DATA,
+            NULL
+        );
+    }
+
+    if(repair->curl &&
+       repair->owns_curl){
+
         curl_easy_cleanup(
             repair->curl
         );

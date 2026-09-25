@@ -170,7 +170,16 @@ Then include the public header:
 
 ## Basic Usage
 
-A minimal application looks like this:
+`tlsrepair` supports two ways of working with libcurl:
+
+1. **Create mode** — `tlsrepair` creates and owns the CURL handle.
+2. **Existing CURL mode** — the application creates the CURL handle and passes it to `tlsrepair` using `tlsrepair_from_curl()`.
+
+Both modes use the same CURL handle for certificate discovery, AIA retrieval, TLS repair, and the final HTTP request.
+
+### Create Mode
+
+In create mode, `tlsrepair` creates and owns the CURL handle.
 
 ```c
 #include <stdio.h>
@@ -211,8 +220,17 @@ int main(void)
     }
 
     if(!tlsrepair_prepare(repair)){
+        fprintf(
+            stderr,
+            "TLSRepair error: %s\n",
+            tlsrepair_error(repair)
+                ? tlsrepair_error(repair)
+                : "unknown error"
+        );
+
         tlsrepair_destroy(repair);
         tlsrepair_global_cleanup();
+
         return 1;
     }
 
@@ -222,9 +240,13 @@ int main(void)
     if(!curl){
         tlsrepair_destroy(repair);
         tlsrepair_global_cleanup();
+
         return 1;
     }
 
+    /*
+     * Configure the application's response handling.
+     */
     curl_easy_setopt(
         curl,
         CURLOPT_WRITEFUNCTION,
@@ -247,6 +269,240 @@ int main(void)
 
     return result == CURLE_OK ? 0 : 1;
 }
+```
+
+In this mode:
+
+```text
+tlsrepair_create()
+        │
+        ▼
+   TLSRepair
+        │
+        ▼
+   CURL handle
+        │
+        ├── owned by TLSRepair
+        │
+        ▼
+tlsrepair_prepare()
+        │
+        ▼
+tlsrepair_curl()
+        │
+        ▼
+curl_easy_perform()
+        │
+        ▼
+tlsrepair_destroy()
+        │
+        ▼
+CURL handle is cleaned up
+```
+
+The application must **not** call `curl_easy_cleanup()` on the CURL handle returned by `tlsrepair_curl()`.
+
+---
+
+### Existing CURL Mode
+
+Applications that already create and configure their own libcurl handle can pass that handle to `tlsrepair` using `tlsrepair_from_curl()`.
+
+This allows `tlsrepair` to operate on an existing CURL handle instead of creating a new one.
+
+```c
+TLSRepair *tlsrepair_from_curl(
+    CURL *curl
+);
+```
+
+Example:
+
+```c
+#include <stdio.h>
+#include <curl/curl.h>
+#include <tlsrepair/tlsrepair.h>
+
+static size_t write_callback(
+    void *contents,
+    size_t size,
+    size_t nmemb,
+    void *userp
+)
+{
+    (void)userp;
+
+    return fwrite(
+        contents,
+        size,
+        nmemb,
+        stdout
+    );
+}
+
+int main(void)
+{
+    if(!tlsrepair_global_init()){
+        return 1;
+    }
+
+    /*
+     * The application creates the CURL handle.
+     */
+    CURL *curl =
+        curl_easy_init();
+
+    if(!curl){
+        tlsrepair_global_cleanup();
+        return 1;
+    }
+
+    curl_easy_setopt(
+        curl,
+        CURLOPT_URL,
+        "https://example.com"
+    );
+
+    curl_easy_setopt(
+        curl,
+        CURLOPT_WRITEFUNCTION,
+        write_callback
+    );
+
+    /*
+     * Give the existing CURL handle to TLSRepair.
+     */
+    TLSRepair *repair =
+        tlsrepair_from_curl(
+            curl
+        );
+
+    if(!repair){
+        curl_easy_cleanup(curl);
+        tlsrepair_global_cleanup();
+
+        return 1;
+    }
+
+    if(!tlsrepair_prepare(repair)){
+        fprintf(
+            stderr,
+            "TLSRepair error: %s\n",
+            tlsrepair_error(repair)
+                ? tlsrepair_error(repair)
+                : "unknown error"
+        );
+
+        tlsrepair_destroy(repair);
+        curl_easy_cleanup(curl);
+        tlsrepair_global_cleanup();
+
+        return 1;
+    }
+
+    /*
+     * tlsrepair_curl() returns the same CURL
+     * handle that was passed to tlsrepair_from_curl().
+     */
+    curl =
+        tlsrepair_curl(repair);
+
+    if(!curl){
+        tlsrepair_destroy(repair);
+        curl_easy_cleanup(curl);
+        tlsrepair_global_cleanup();
+
+        return 1;
+    }
+
+    /*
+     * Configure the application's final response handling.
+     */
+    curl_easy_setopt(
+        curl,
+        CURLOPT_WRITEFUNCTION,
+        write_callback
+    );
+
+    CURLcode result =
+        curl_easy_perform(curl);
+
+    if(result != CURLE_OK){
+        fprintf(
+            stderr,
+            "curl error: %s\n",
+            curl_easy_strerror(result)
+        );
+    }
+
+    /*
+     * TLSRepair does not own the CURL handle
+     * in from_curl() mode.
+     */
+    tlsrepair_destroy(repair);
+
+    /*
+     * The application is responsible for cleanup.
+     */
+    curl_easy_cleanup(curl);
+
+    tlsrepair_global_cleanup();
+
+    return result == CURLE_OK ? 0 : 1;
+}
+```
+
+The ownership model is different:
+
+```text
+Application
+    │
+    ▼
+curl_easy_init()
+    │
+    ▼
+CURL handle
+    │
+    │ owned by application
+    ▼
+tlsrepair_from_curl(curl)
+    │
+    ▼
+TLSRepair
+    │
+    ▼
+tlsrepair_prepare()
+    │
+    ▼
+tlsrepair_curl()
+    │
+    │ returns the same CURL handle
+    ▼
+curl_easy_perform()
+    │
+    ▼
+tlsrepair_destroy()
+    │
+    │ does NOT clean up CURL
+    ▼
+curl_easy_cleanup()
+    │
+    │ application performs cleanup
+    ▼
+CURL destroyed
+```
+
+The important rule is:
+
+```text
+tlsrepair_create()
+    → TLSRepair owns CURL
+    → tlsrepair_destroy() cleans CURL
+
+tlsrepair_from_curl()
+    → Application owns CURL
+    → tlsrepair_destroy() does NOT clean CURL
+    → Application calls curl_easy_cleanup()
 ```
 
 ## API
@@ -284,7 +540,7 @@ Call this after all `TLSRepair` objects have been destroyed.
 
 ### `tlsrepair_create`
 
-Creates a TLS repair object.
+Creates a TLS repair object and its internal CURL handle.
 
 ```c
 TLSRepair *tlsrepair_create(
@@ -294,13 +550,63 @@ TLSRepair *tlsrepair_create(
 
 The URL is used during certificate discovery and repair.
 
+The CURL handle is owned by the resulting `TLSRepair` object.
+
 Returns `NULL` on failure.
+
+---
+
+### `tlsrepair_from_curl`
+
+Creates a TLS repair object from an existing libcurl easy handle.
+
+```c
+TLSRepair *tlsrepair_from_curl(
+    CURL *curl
+);
+```
+
+The supplied CURL handle must already have the request URL configured.
+
+Example:
+
+```c
+CURL *curl =
+    curl_easy_init();
+
+curl_easy_setopt(
+    curl,
+    CURLOPT_URL,
+    "https://example.com"
+);
+
+TLSRepair *repair =
+    tlsrepair_from_curl(curl);
+```
+
+`tlsrepair_from_curl()` does **not** take ownership of the CURL handle.
+
+The application remains responsible for calling:
+
+```c
+curl_easy_cleanup(curl);
+```
+
+after:
+
+```c
+tlsrepair_destroy(repair);
+```
+
+The same CURL handle is used throughout the repair process.
+
+This mode is useful when the application already has a CURL handle with its own request configuration.
 
 ---
 
 ### `tlsrepair_set_proxy`
 
-Configures a proxy for the internal libcurl connection.
+Configures a proxy for the CURL connection.
 
 ```c
 int tlsrepair_set_proxy(
@@ -346,13 +652,13 @@ Returns:
 0  Failure
 ```
 
-A successful result means the internal libcurl connection is configured and ready for the application's final HTTP request.
+A successful result means the CURL connection has been prepared for the application's final HTTPS request.
 
 ---
 
 ### `tlsrepair_curl`
 
-Returns the libcurl easy handle used by the repair object.
+Returns the CURL easy handle associated with the repair object.
 
 ```c
 CURL *tlsrepair_curl(
@@ -360,20 +666,20 @@ CURL *tlsrepair_curl(
 );
 ```
 
-The application can use this handle to configure and perform its actual HTTP request.
+In `tlsrepair_create()` mode, this returns the CURL handle created by TLSRepair.
 
-For example:
+In `tlsrepair_from_curl()` mode, this returns the **same CURL handle supplied by the application**.
+
+Example:
 
 ```c
 CURL *curl =
     tlsrepair_curl(repair);
+```
 
-curl_easy_setopt(
-    curl,
-    CURLOPT_HTTPGET,
-    1L
-);
+The application uses this handle for the final HTTP request:
 
+```c
 curl_easy_setopt(
     curl,
     CURLOPT_WRITEFUNCTION,
@@ -382,8 +688,6 @@ curl_easy_setopt(
 
 curl_easy_perform(curl);
 ```
-
-The application is responsible for the final HTTP request and response handling.
 
 ---
 
@@ -396,6 +700,27 @@ void tlsrepair_destroy(
     TLSRepair *repair
 );
 ```
+
+Ownership determines whether the CURL handle is cleaned up.
+
+For `tlsrepair_create()`:
+
+```text
+tlsrepair_destroy()
+    └── cleans up CURL
+```
+
+For `tlsrepair_from_curl()`:
+
+```text
+tlsrepair_destroy()
+    └── does NOT clean up CURL
+
+application
+    └── curl_easy_cleanup(curl)
+```
+
+---
 
 ## Request Ownership
 
@@ -412,10 +737,12 @@ The application remains responsible for:
 * HTTP status handling
 * `curl_easy_perform()`
 
-This allows the library to be used with applications that need different HTTP behaviors.
+The general flow is:
 
 ```text
 Application
+    │
+    ├── Create or provide CURL
     │
     ├── Create TLSRepair
     │
@@ -435,11 +762,34 @@ Application
         HTTPS connection
              │
              ▼
-      TLS certificate verification
+     TLS certificate verification
              │
              ▼
        AIA intermediates
 ```
+
+### Important: Response Callback
+
+During certificate discovery, `tlsrepair` temporarily uses its own response handling internally.
+
+Therefore, applications should configure their final response callback after `tlsrepair_prepare()` and before the final `curl_easy_perform()`.
+
+For example:
+
+```c
+CURL *curl =
+    tlsrepair_curl(repair);
+
+curl_easy_setopt(
+    curl,
+    CURLOPT_WRITEFUNCTION,
+    write_callback
+);
+
+curl_easy_perform(curl);
+```
+
+This keeps TLS certificate discovery separate from the application's final response processing.
 
 ## TLS Verification
 

@@ -13,6 +13,10 @@ TLSRepair *tlsrepair_create(
     const char *url
 );
 
+TLSRepair *tlsrepair_from_curl(
+    CURL *curl
+);
+
 int tlsrepair_set_proxy(
     TLSRepair *repair,
     const char *proxy
