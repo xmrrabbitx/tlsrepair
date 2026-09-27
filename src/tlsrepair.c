@@ -166,6 +166,28 @@ static size_t discard_callback(
     return size * nmemb;
 }
 
+static CURL *create_internal_curl(
+    TLSRepair *repair
+)
+{
+    CURL *curl;
+
+    if(!repair || !repair->curl){
+        return NULL;
+    }
+
+    curl =
+        curl_easy_duphandle(
+            repair->curl
+        );
+
+    if(!curl){
+        return NULL;
+    }
+
+    return curl;
+}
+
 static X509 *parse_certificate(
     TLSRepair *repair,
     const char *data
@@ -1301,6 +1323,7 @@ static int reset_curl_for_final_request(
 
 static int get_server_certificates(
     TLSRepair *repair,
+    CURL *internal_curl,
     STACK_OF(X509) **certificates
 )
 {
@@ -1308,7 +1331,7 @@ static int get_server_certificates(
         return 0;
     }
 
-    if(!repair->curl ||
+    if(!internal_curl  ||
        !certificates){
 
         set_error(
@@ -1325,7 +1348,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            repair->curl,
+            internal_curl,
             CURLOPT_NOBODY,
             0L
         );
@@ -1342,7 +1365,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            repair->curl,
+            internal_curl,
             CURLOPT_HTTPGET,
             1L
         );
@@ -1359,7 +1382,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            repair->curl,
+            internal_curl,
             CURLOPT_CERTINFO,
             1L
         );
@@ -1376,7 +1399,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            repair->curl,
+            internal_curl,
             CURLOPT_SSL_VERIFYPEER,
             0L
         );
@@ -1393,7 +1416,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            repair->curl,
+            internal_curl,
             CURLOPT_SSL_VERIFYHOST,
             0L
         );
@@ -1410,7 +1433,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            repair->curl,
+            internal_curl,
             CURLOPT_FRESH_CONNECT,
             1L
         );
@@ -1427,7 +1450,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            repair->curl,
+            internal_curl,
             CURLOPT_WRITEFUNCTION,
             discard_callback
         );
@@ -1444,7 +1467,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_setopt(
-            repair->curl,
+            internal_curl,
             CURLOPT_WRITEDATA,
             NULL
         );
@@ -1461,7 +1484,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_perform(
-            repair->curl
+            internal_curl
         );
 
     if(result != CURLE_OK){
@@ -1480,7 +1503,7 @@ static int get_server_certificates(
 
         result =
             curl_easy_getinfo(
-                repair->curl,
+                internal_curl,
                 CURLINFO_EFFECTIVE_URL,
                 &effective_url
             );
@@ -1522,7 +1545,7 @@ static int get_server_certificates(
 
     result =
         curl_easy_getinfo(
-            repair->curl,
+            internal_curl,
             CURLINFO_CERTINFO,
             &certInfo
         );
@@ -1578,7 +1601,7 @@ static int get_server_certificates(
 
 static int download_aia_certificate(
     TLSRepair *repair,
-    CURL *curl,
+    CURL *internal_curl,
     const char *url,
     struct Memory *memory
 )
@@ -1587,7 +1610,7 @@ static int download_aia_certificate(
         return 0;
     }
 
-    if(!curl || !url || !memory){
+    if(!internal_curl || !url || !memory){
         set_error(
             repair,
             "invalid AIA download parameters"
@@ -1611,7 +1634,7 @@ static int download_aia_certificate(
 
         result =
             curl_easy_getinfo(
-                curl,
+                internal_curl,
                 CURLINFO_EFFECTIVE_URL,
                 &original_url
             );
@@ -1631,7 +1654,7 @@ static int download_aia_certificate(
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_URL,
             url
         );
@@ -1648,7 +1671,7 @@ static int download_aia_certificate(
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_NOBODY,
             0L
         );
@@ -1665,7 +1688,7 @@ static int download_aia_certificate(
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_HTTPGET,
             1L
         );
@@ -1682,7 +1705,7 @@ static int download_aia_certificate(
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_CUSTOMREQUEST,
             NULL
         );
@@ -1699,7 +1722,7 @@ static int download_aia_certificate(
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_POST,
             0L
         );
@@ -1716,7 +1739,7 @@ static int download_aia_certificate(
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_UPLOAD,
             0L
         );
@@ -1733,7 +1756,7 @@ static int download_aia_certificate(
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_WRITEFUNCTION,
             write_callback
         );
@@ -1750,7 +1773,7 @@ static int download_aia_certificate(
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_WRITEDATA,
             memory
         );
@@ -1767,7 +1790,7 @@ static int download_aia_certificate(
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_SSL_VERIFYPEER,
             0L
         );
@@ -1784,7 +1807,7 @@ static int download_aia_certificate(
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_SSL_VERIFYHOST,
             0L
         );
@@ -1801,7 +1824,7 @@ static int download_aia_certificate(
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_FRESH_CONNECT,
             1L
         );
@@ -1818,7 +1841,7 @@ static int download_aia_certificate(
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_FOLLOWLOCATION,
             0L
         );
@@ -1835,7 +1858,7 @@ static int download_aia_certificate(
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_CONNECTTIMEOUT,
             10L
         );
@@ -1852,7 +1875,7 @@ static int download_aia_certificate(
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_TIMEOUT,
             30L
         );
@@ -1868,7 +1891,7 @@ static int download_aia_certificate(
     }
 
     result =
-        curl_easy_perform(curl);
+        curl_easy_perform(internal_curl);
 
     if(result != CURLE_OK){
 
@@ -1907,7 +1930,7 @@ restore_url:
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_URL,
             original_url
         );
@@ -1930,7 +1953,7 @@ restore_url:
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_WRITEFUNCTION,
             discard_callback
         );
@@ -1953,7 +1976,7 @@ restore_url:
 
     result =
         curl_easy_setopt(
-            curl,
+            internal_curl,
             CURLOPT_WRITEDATA,
             NULL
         );
@@ -1985,7 +2008,7 @@ restore_url:
 
 static X509 *download_and_parse_aia_certificate(
     TLSRepair *repair,
-    CURL *curl,
+    CURL *internal_curl,
     const char *url
 )
 {
@@ -1993,7 +2016,7 @@ static X509 *download_and_parse_aia_certificate(
 
     if(!download_aia_certificate(
         repair,
-        curl,
+        internal_curl,
         url,
         &memory
     )){
@@ -2298,6 +2321,21 @@ int tlsrepair_prepare(
         return 0;
     }
 
+    CURL *internal_curl =
+        create_internal_curl(
+            repair
+        );
+
+    if(!internal_curl){
+
+        set_error(
+            repair,
+            "failed to create internal cURL handle"
+        );
+
+        return 0;
+    }
+
     repair->repaired = 0;
 
     if(repair->aia_certificates){
@@ -2320,10 +2358,15 @@ int tlsrepair_prepare(
         );
 
     if(result != CURLE_OK){
+
         set_curl_error(
             repair,
             "failed to clear SSL context callback",
             result
+        );
+
+        curl_easy_cleanup(
+            internal_curl
         );
 
         return 0;
@@ -2337,10 +2380,15 @@ int tlsrepair_prepare(
         );
 
     if(result != CURLE_OK){
+
         set_curl_error(
             repair,
             "failed to clear SSL context callback data",
             result
+        );
+
+        curl_easy_cleanup(
+            internal_curl
         );
 
         return 0;
@@ -2350,8 +2398,14 @@ int tlsrepair_prepare(
 
     if(!get_server_certificates(
         repair,
+        internal_curl,
         &certificates
     )){
+
+        curl_easy_cleanup(
+            internal_curl
+        );
+
         return 0;
     }
 
@@ -2373,17 +2427,27 @@ int tlsrepair_prepare(
             X509_free
         );
 
+        curl_easy_cleanup(
+            internal_curl
+        );
+
         return 0;
     }
 
     X509_STORE *store =
-        create_trust_store(repair);
+        create_trust_store(
+            repair
+        );
 
     if(!store){
 
         sk_X509_pop_free(
             certificates,
             X509_free
+        );
+
+        curl_easy_cleanup(
+            internal_curl
         );
 
         return 0;
@@ -2397,11 +2461,17 @@ int tlsrepair_prepare(
 
     if(!untrusted){
 
-        X509_STORE_free(store);
+        X509_STORE_free(
+            store
+        );
 
         sk_X509_pop_free(
             certificates,
             X509_free
+        );
+
+        curl_easy_cleanup(
+            internal_curl
         );
 
         return 0;
@@ -2422,18 +2492,23 @@ int tlsrepair_prepare(
             X509_free
         );
 
-        X509_STORE_free(store);
+        X509_STORE_free(
+            store
+        );
 
         sk_X509_pop_free(
             certificates,
             X509_free
         );
 
+        curl_easy_cleanup(
+            internal_curl
+        );
+
         return reset_curl_for_final_request(
             repair
         );
     }
-
 
     if(verifyResult < 0){
 
@@ -2442,17 +2517,26 @@ int tlsrepair_prepare(
             X509_free
         );
 
-        X509_STORE_free(store);
+        X509_STORE_free(
+            store
+        );
 
         sk_X509_pop_free(
             certificates,
             X509_free
         );
 
+        curl_easy_cleanup(
+            internal_curl
+        );
+
         return 0;
     }
 
-    X509 *current = X509_dup(leaf);
+    X509 *current =
+        X509_dup(
+            leaf
+        );
 
     if(!current){
 
@@ -2461,24 +2545,26 @@ int tlsrepair_prepare(
             "failed to duplicate leaf certificate"
         );
 
-        X509_free(current);
-        current = NULL;
-
         sk_X509_pop_free(
             untrusted,
             X509_free
         );
 
-        X509_STORE_free(store);
+        X509_STORE_free(
+            store
+        );
 
         sk_X509_pop_free(
             certificates,
             X509_free
         );
 
+        curl_easy_cleanup(
+            internal_curl
+        );
+
         return 0;
     }
-    
 
     int repaired = 0;
 
@@ -2517,11 +2603,13 @@ int tlsrepair_prepare(
         X509 *aiaCert =
             download_and_parse_aia_certificate(
                 repair,
-                repair->curl,
+                internal_curl,
                 aiaUrl
             );
 
-        free(aiaUrl);
+        free(
+            aiaUrl
+        );
 
         if(!aiaCert){
             break;
@@ -2537,7 +2625,9 @@ int tlsrepair_prepare(
                 "AIA certificate is not the issuer of the current certificate"
             );
 
-            X509_free(aiaCert);
+            X509_free(
+                aiaCert
+            );
 
             break;
         }
@@ -2547,7 +2637,9 @@ int tlsrepair_prepare(
             aiaCert
         )){
 
-            X509_free(aiaCert);
+            X509_free(
+                aiaCert
+            );
 
             break;
         }
@@ -2562,7 +2654,9 @@ int tlsrepair_prepare(
                 "failed to add AIA certificate to verification chain"
             );
 
-            X509_free(aiaCert);
+            X509_free(
+                aiaCert
+            );
 
             break;
         }
@@ -2572,8 +2666,13 @@ int tlsrepair_prepare(
             aiaCert
         )){
 
-            sk_X509_pop(untrusted);
-            X509_free(aiaCert);
+            sk_X509_pop(
+                untrusted
+            );
+
+            X509_free(
+                aiaCert
+            );
 
             break;
         }
@@ -2599,18 +2698,30 @@ int tlsrepair_prepare(
                 untrusted
             );
 
-            X509_free(aiaCert);
+            X509_free(
+                aiaCert
+            );
 
             break;
         }
 
         if(result < 0){
-            sk_X509_pop(untrusted);
-            X509_free(aiaCert);
+
+            sk_X509_pop(
+                untrusted
+            );
+
+            X509_free(
+                aiaCert
+            );
+
             break;
         }
 
-        X509 *next = X509_dup(aiaCert);
+        X509 *next =
+            X509_dup(
+                aiaCert
+            );
 
         if(!next){
 
@@ -2619,24 +2730,33 @@ int tlsrepair_prepare(
                 "failed to duplicate AIA issuer certificate"
             );
 
-            X509_free(aiaCert);
+            X509_free(
+                aiaCert
+            );
 
             break;
         }
 
-
-        X509_free(current);
+        X509_free(
+            current
+        );
 
         current = next;
     }
 
-    X509_free(current);
-    
+    X509_free(
+        current
+    );
+
     sk_X509_pop_free(
         untrusted,
         X509_free
     );
-    X509_STORE_free(store);
+
+    X509_STORE_free(
+        store
+    );
+
     sk_X509_pop_free(
         certificates,
         X509_free
@@ -2662,6 +2782,10 @@ int tlsrepair_prepare(
             );
         }
 
+        curl_easy_cleanup(
+            internal_curl
+        );
+
         return 0;
     }
 
@@ -2676,6 +2800,10 @@ int tlsrepair_prepare(
 
         repair->aia_certificates = NULL;
 
+        curl_easy_cleanup(
+            internal_curl
+        );
+
         return 0;
     }
 
@@ -2685,10 +2813,18 @@ int tlsrepair_prepare(
 
         repair->repaired = 0;
 
+        curl_easy_cleanup(
+            internal_curl
+        );
+
         return 0;
     }
 
     repair->repaired = 1;
+
+    curl_easy_cleanup(
+        internal_curl
+    );
 
     return 1;
 }
