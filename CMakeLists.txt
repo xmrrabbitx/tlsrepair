@@ -11,6 +11,20 @@ include(CMakePackageConfigHelpers)
 find_package(CURL REQUIRED)
 find_package(OpenSSL REQUIRED)
 
+# ------------------------------------------------------------
+# pkg-config
+# ------------------------------------------------------------
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/tlsrepair.pc.in
+    ${CMAKE_CURRENT_BINARY_DIR}/tlsrepair.pc
+    @ONLY
+)
+
+# ------------------------------------------------------------
+# Libraries
+# ------------------------------------------------------------
+
 add_library(tlsrepair_static STATIC
     src/tlsrepair.c
 )
@@ -57,6 +71,10 @@ set_target_properties(tlsrepair_shared PROPERTIES
     EXPORT_NAME tlsrepair
 )
 
+# ------------------------------------------------------------
+# Tests
+# ------------------------------------------------------------
+
 add_executable(tlsrepair_test_static
     tests/tlsrepair_test.c
 )
@@ -89,10 +107,15 @@ set_target_properties(tlsrepair_test_shared PROPERTIES
     BUILD_RPATH "${CMAKE_BINARY_DIR}"
 )
 
+# ------------------------------------------------------------
+# CMake package configuration
+# ------------------------------------------------------------
+
 configure_package_config_file(
-    cmake/tlsrepairConfig.cmake.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/tlsrepairConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/tlsrepairConfig.cmake
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/tlsrepair
+    INSTALL_DESTINATION
+        ${CMAKE_INSTALL_LIBDIR}/cmake/tlsrepair
 )
 
 write_basic_package_version_file(
@@ -100,6 +123,10 @@ write_basic_package_version_file(
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
+
+# ------------------------------------------------------------
+# Installation
+# ------------------------------------------------------------
 
 install(
     FILES
@@ -109,7 +136,9 @@ install(
 )
 
 install(
-    TARGETS tlsrepair_static tlsrepair_shared
+    TARGETS
+        tlsrepair_static
+        tlsrepair_shared
     EXPORT tlsrepairTargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -119,7 +148,8 @@ install(
     EXPORT tlsrepairTargets
     FILE tlsrepairTargets.cmake
     NAMESPACE tlsrepair::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/tlsrepair
+    DESTINATION
+        ${CMAKE_INSTALL_LIBDIR}/cmake/tlsrepair
 )
 
 install(
@@ -128,4 +158,15 @@ install(
         ${CMAKE_CURRENT_BINARY_DIR}/tlsrepairConfigVersion.cmake
     DESTINATION
         ${CMAKE_INSTALL_LIBDIR}/cmake/tlsrepair
+)
+
+# ------------------------------------------------------------
+# pkg-config installation
+# ------------------------------------------------------------
+
+install(
+    FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/tlsrepair.pc
+    DESTINATION
+        ${CMAKE_INSTALL_LIBDIR}/pkgconfig
 )
